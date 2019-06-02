@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<title>pencilHatchingDemo</title>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+
+		<style>
+            *{
+                margin: 0;
+                padding: 0;
+                box-sizing: border-box;
+            }
+            body {
+   
+                background-color: #000000;
+               /* background-image: url(textures/paper.jpg);*/
+                background-position: 0 bottom;
+                margin: 0px;
+                overflow: hidden;
+            }
+            
+            @media only screen and (max-device-width: 480px) {
+                #info{ display: none;}
+            }
+        </style>
+	</head>
+	<body>
+
+		<div id="container"></div>
+		<script src="js/three.min.js"></script>
+		<script src="js/dat.gui.min.js"></script>
+
+		<script id="vertexShader" type="x-shader/x-vertex">
+
+			varying vec2 vUv;
+			varying vec3 vNormal, vPosition;
+
+			uniform vec2 uvScale;
+			
+			void main() {
+				vUv = uvScale * uv;
+				vNormal = normalMatrix * normal;
+				vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+				vPosition = mvPosition.xyz;
+				gl_Position = projectionMatrix * mvPosition;
+			}
+
+		</script>
+		                                    
+
+		<script id="fragmentShader" type="x-shader/x-fragment">// fragment片元着色器，经典的phong模型
+			varying vec2 vUv;
+			varying vec3 vNormal, vPosition;
+
+			uniform sampler2D hatchs_0, hatchs_1, hatchs_2, hatchs_3, hatchs_4, hatchs_5;
+			uniform vec3 lightPos;
+			uniform float m_ambient, m_diffuse, m_specular, m_shininess;
+
+			vec3 color = vec3(1.0);
+			vec3 lightColor = color;
+
+
+			vec4 pencilHatching() {
+				float ambient = 1.0;
+				float specular = 0.0;
+				float diffuse = max(0.0, dot( vNormal, normalize( vec3(lightPos ) ) ) );
+
+				vec3 N = normalize( vNormal );
+				vec3 L = -reflect( lightPos, N );
+				L = normalize(L);
+				vec3 V = -vPosition;
+				V = normalize(V);
+
+				specular = pow( max( 0.0, dot( L, V ) ), m_shininess);
+				float factors = m_ambient * ambient + m_diffuse * diffuse + m_specular * specular ;
+				factors = factors * 6.0;
+
+				vec4 finalHatch = vec4(1.0);
+				if( factors <= 1.0 ) finalHatch = mix( texture2D( hatchs_5, vUv ), texture2D( hatchs_4, vUv ), factors );
+				else if( factors > 1.0 && factors <= 2.0 ) finalHatch = mix( texture2D( hatchs_4, vUv ), texture2D( hatchs_3, vUv ), factors - 1.0 );
+				else if( factors > 2.0 && factors <= 3.0 ) finalHatch = mix( texture2D( hatchs_3, vUv ), texture2D( hatchs_2, vUv ), factors - 2.0 );
+				else if( factors > 3.0 && factors <= 4.0 ) finalHatch = mix( texture2D( hatchs_2, vUv ), texture2D( hatchs_1, vUv ), factors - 3.0 );
+				else if( factors > 4.0 && factors <= 5.0 ) finalHatch = mix( texture2D( hatchs_1, vUv ), texture2D( hatchs_0, vUv ), factors - 4.0 );
+				else if( factors > 5.0 ) finalHatch = mix( texture2D( hatchs_0, vUv ), vec4(1.0), factors - 5.0 );
+
+				return finalHatch;
+				
+			}
+			void main() {
+
+				vec4 color = pencilHatching();
+				gl_FragColor = vec4( 0.7 * color.rgb, 1.0 );
+
+			}
+		</script>
+
+		
+
+	
+		<script>
+
+			var container;
+			var camera, scene, renderer;
+			var uniform, material;
+
+			var cameraFar = 1000, cameraZ = 400;
+			var isInteracting = false;
+			var fov = 120, tmp_fov = 45;
+			var lon = 0, tmp_lon = 0;
+			var lat = 0, tmp_lat = 0;
+			var pitch =0, yaw = 0;
+
+			
+			var Contros = function() {
+	            this.ambient = 18;
+	            this.diffuse = 100;
+	            this.specular = 100;
+	            this.shininess = 100;
+	            this.uscale = 4;
+	            this.vscale = 2;
+		    };
+	        var contro = new Contros();
+	        var controGUI = new dat.GUI();
+			init();
+			animate();
+			function initMaterial() { //物体的材质
+				uniform = {
+					m_ambient: { type: 'f', value : 0 },
+					m_diffuse: { type: 'f', value : 1 },
+					m_specular: { type: 'f', value : 1 },
+					m_shininess: { type: 'f', value : 100 },
+					lightPos: { type: 'v3', value: new THREE.Vector3(-100, 100, 0) },
+					uvScale: { type: 'v2', value: new THREE.Vector2(1, 1) },
+
+					hatchs_0: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_0.jpg' ) },
+					hatchs_1: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_1.jpg' ) },
+					hatchs_2: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_2.jpg' ) },
+					hatchs_3: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_3.jpg' ) },
+					hatchs_4: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_4.jpg' ) },
+					hatchs_5: { type: 't', value: new THREE.TextureLoader().load( 'textures/hatch_5.jpg' ) }
+					
+				};
+
+				//uniform类型的变量是表示外部设置着色器数据
+				uniform.hatchs_0.value.wrapS = uniform.hatchs_0.value.wrapT = THREE.RepeatWrapping;
+				uniform.hatchs_1.value.wrapS = uniform.hatchs_1.value.wrapT = THREE.RepeatWrapping;
+				uniform.hatchs_2.value.wrapS = uniform.hatchs_2.value.wrapT = THREE.RepeatWrapping;
+				uniform.hatchs_3.value.wrapS = uniform.hatchs_3.value.wrapT = THREE.RepeatWrapping;
+				uniform.hatchs_4.value.wrapS = uniform.hatchs_4.value.wrapT = THREE.RepeatWrapping;
+				uniform.hatchs_5.value.wrapS = uniform.hatchs_5.value.wrapT = THREE.RepeatWrapping;
+		
+
+				// var uniform1 = uniform;
+				material = new THREE.ShaderMaterial( {
+
+					uniforms: uniform,
+					vertexShader: document.getElementById( 'vertexShader' ).textContent,
+					fragmentShader: document.getElementById( 'fragmentShader' ).textContent
+
+				} );
+	
+			}
+
+			function initCamera() {
+				camera = new THREE.PerspectiveCamera( fov, window.innerWidth / window.innerHeight, 1, cameraFar );
+				camera.position.z = cameraZ;
+			}
+
+			function initRenderer() {
+				renderer = new THREE.WebGLRenderer( { antialias: true, alpha: true } );
+				renderer.setPixelRatio( window.devicePixelRatio );
+			}
+
+			function initScene() {
+				scene = new THREE.Scene(); //场景几何体
+				var mesh;
+				
+				
+                mesh = new THREE.Mesh( new THREE.TorusGeometry( 50, 15, 120, 25 ), material ); mesh.position.set( -100, -85, -20 );mesh.rotateX(Math.PI/2); scene.add( mesh ); //添加几何体
+                
+                
+				mesh = new THREE.Mesh( new THREE.SphereGeometry( 39, 36, 36 ), material );  mesh.position.set( -20, -10, 100 );scene.add( mesh );
+
+				
+				mesh = new THREE.Mesh( new THREE.CubeGeometry( 370, 0.1, 370 ), material );  mesh.position.set( 0, -100, 0 );scene.add( mesh );
+			
+				
+				mesh = new THREE.Mesh( new THREE.BoxBufferGeometry( 60, 60, 60, 1, 1, 1 ), material ); mesh.position.set( 90, -70, 100 );
+				scene.add( mesh );
+
+				mesh = new THREE.Mesh( new THREE.CylinderBufferGeometry( 25, 75, 100, 40, 5 ), material );mesh.position.set( 50, -50, -100 );
+				scene.add( mesh );
+				var points = [];
+				for ( var i = 0; i < 50; i ++ ) {
+					points.push( new THREE.Vector2( Math.sin( i * 0.2 ) * Math.sin( i * 0.1 ) * 15 + 50, ( i - 5 ) * 2 ) );
+				}
+
+				mesh = new THREE.Mesh( new THREE.LatheBufferGeometry( points, 50 ), material );mesh.position.set( -20, -90, 100 );
+				scene.add( mesh );
+			}
+
+			function initControGUI() {
+				controGUI.add( contro, 'ambient', 0.0, 100.0 );
+	            controGUI.add( contro, 'diffuse', 0.0, 100.0 );
+	            controGUI.add( contro, 'specular', 0.0, 100.0 );
+	            controGUI.add( contro, 'shininess', 1, 100 );
+	            controGUI.add( contro, 'uscale', 0, 10 );
+	            controGUI.add( contro, 'vscale', 0, 10 );
+			}
+
+			function init() { //监听鼠标操作，场景移动、缩放
+
+				container = document.getElementById( 'container' );
+				initCamera();
+				initRenderer();
+				container.appendChild( renderer.domElement );
+				initMaterial();
+				initScene();
+				initControGUI();
+				
+				onWindowResize();
+				window.addEventListener( 'resize', onWindowResize, false );
+
+				/* mouseEvent or touchEvent */
+				container.addEventListener( 'mousedown', _mouseClick);
+				container.addEventListener( 'touchstart', _mouseClick);
+
+				container.addEventListener( 'mousemove', _mouseMove);
+				container.addEventListener( 'touchmove', _mouseMove);
+
+				container.addEventListener( 'mouseup', _mouseRelease);
+				container.addEventListener( 'touchend', _mouseRelease);
+
+				container.addEventListener( 'mousewheel', _mouseWheel, false );
+            	container.addEventListener( 'DOMMouseScroll', _mouseWheel, false);
+
+				function _mouseClick( event ) {
+					var x, y;
+	                if( event.changedTouches ) {
+	                    x = event.changedTouches[ 0 ].pageX;
+	                    y = event.changedTouches[ 0 ].pageY;
+	                } else {
+	                    x = event.clientX;
+	                    y = event.clientY;
+	                }
+	                isInteracting = true;
+
+	                onPointerDownPointerX = x;
+	                onPointerDownPointerY = y;
+
+	                onPointerDownLon = lon;
+	                onPointerDownLat = lat;
+
+	                event.preventDefault();
+				}
+
+				function _mouseMove( event ) {
+	                if ( isInteracting ) {
+						if( event.changedTouches ) {
+		                    x = event.changedTouches[ 0 ].pageX;
+		                    y = event.changedTouches[ 0 ].pageY;
+		                } else {
+		                    x = event.clientX;
+		                    y = event.clientY;
+		                }
+
+	                    tmp_lon = ( x - onPointerDownPointerX ) * 0.5 + onPointerDownLon;
+	                    tmp_lat = ( y - onPointerDownPointerY ) * 0.5 + onPointerDownLat;
+	                }
+
+	                event.preventDefault();
+				}
+
+				function _mouseRelease( event ) {
+	                isInteracting = false;
+	                event.preventDefault();
+				}
+
+				function _mouseWheel( event ) {
+					if ( event.wheelDelta ) {
+	                    tmp_fov -= event.wheelDelta * 0.005;
+	                
+	                } else if ( event.detail ) { // Firefox
+	                    tmp_fov += event.detail * 1.0;
+	                }
+	                event.preventDefault();
+				}
+
+			}
+
+			function updateFactors() {
+				material.uniforms.m_ambient.value = contro.ambient / 100;
+	            material.uniforms.m_diffuse.value = contro.diffuse / 100;
+	            material.uniforms.m_specular.value = contro.specular / 100;
+	            material.uniforms.m_shininess.value = contro.shininess;
+	            material.uniforms.uvScale.value.set(contro.uscale, contro.vscale);
+			}
+
+			function updateCamera() {
+				if(tmp_lat < -89.0) tmp_lat = -89.0;
+	            if(tmp_lat > 89.0) tmp_lat = 89.0;
+	            lat += ( tmp_lat - lat ) * 0.05;
+	            lon += ( tmp_lon - lon ) * 0.05;
+	            pitch = ( 90.0 - lat ) * Math.PI / 180.0;
+	            yaw = lon * Math.PI / 180.0;
+	            fov += ( tmp_fov - fov ) * 0.05;
+	            camera.projectionMatrix.makePerspective( fov, window.innerWidth / window.innerHeight, 1, cameraFar );
+	            camera.position.x = cameraZ * Math.sin( pitch ) * Math.cos( yaw );
+	            camera.position.y = cameraZ * Math.cos( pitch );
+	            camera.position.z = cameraZ * Math.sin( pitch ) * Math.sin( yaw );
+	            camera.lookAt( scene.position );
+			}
+
+			function onWindowResize() {
+
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize( window.innerWidth, window.innerHeight );
+
+			}
+
+
+			function animate() {
+				requestAnimationFrame( animate );
+				render();
+			}
+
+			
+
+			function render() {
+			
+				updateFactors();
+	            updateCamera();
+	            
+				renderer.render( scene, camera );
+
+			}
+
+		</script>
+
+	</body>
+</html>
